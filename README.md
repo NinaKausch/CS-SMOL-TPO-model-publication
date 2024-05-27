@@ -22,13 +22,13 @@ python 02_Make_RDKIT_features.py --path  <your path> --input <your_input_file>.c
 ```
 
 - **Training the Model**
-- To train the model run:
+To train the model run:
 ```
 python 03_Train_model.py  <your path> --input <your_input_file>_02_train_test.csv --model catboost --cv --cluster --TC 0.2
 ```
 
 - **Inference**
-- to run an inference use:
+to run an inference use:
 ```
 python 04_Predict.py  <your path> --input <your_input_file>_orig_feat.csv --trained_model <your_model>.cbm --features <your_input_file>_02_train_testcatboost_03_required_features.csv --test_set
 ```
