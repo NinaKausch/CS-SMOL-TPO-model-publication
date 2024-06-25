@@ -60,6 +60,28 @@ def calculate_chargestate(physchem_df, input_chargestate, output_chargestate):
         cmd_str += ' --data_path ' + data_path
     subprocess.call(cmd_str, shell=True)
 
+#################################################### ChemBL SMILES CLEANING #################################################################
+
+from chembl_structure_pipeline import standardizer
+
+def chembl_standardize(smiles):
+    '''Function for default standardization as employed in ChEMBl. Copyright (c) 2019 Greg Landrum;
+    see: https://github.com/chembl/ChEMBL_Structure_Pipeline/blob/master/chembl_structure_pipeline/standardizer.py
+         https://jcheminf.biomedcentral.com/articles/10.1186/s13321-020-00456-1'''
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is not None:
+        # Convert the Mol object to a molblock string
+        molblock = Chem.MolToMolBlock(mol)
+        # Now, pass the molblock string to standardize_molblock
+        std_molblock = standardizer.standardize_molblock(molblock)
+        # Convert the standardized molblock back to a Mol object
+        std_mol = Chem.MolFromMolBlock(std_molblock)
+        # Convert the Mol object to SMILES
+        return Chem.MolToSmiles(std_mol)
+    else:
+        return None
+
 #################################################### BASIC SMILES CLEANING #################################################################
 
 def standardized_mol(smiles):
@@ -310,6 +332,7 @@ def split_train_test (df):
     # PHNS
     X_train_all = X_train_id
     X_train = X_train_id.drop(columns=id_list, errors='ignore')
+    print('X_train.columns', X_train.columns)
     X_test = X_test_id.drop(columns=id_list, errors='ignore')
 
     return X_train, X_test, y_train, y_test, X_id, df_feat, X_train_all

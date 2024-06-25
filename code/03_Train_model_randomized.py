@@ -41,8 +41,22 @@ def main(path, infile, model, cluster,tc):
 
     df = pd.read_table(os.path.join(absolute_path, path, infile), sep = ';', decimal = '.')
 
+    # Randomize all rows before starting Training!
+    ids_before = df['ID'].tolist()
+    df = df.sample(frac=1, random_state=42)
+    ids_after = df['ID'].tolist()
+    # Compare the two lists to check if they are in the same order
+    if ids_before == ids_after:
+        print("The IDs are in the same order after randomization.")
+    else:
+        print("The IDs are NOT in the same order after randomization.")
+
     print(df.shape)
-    print(df.describe)
+    print(df.columns)
+    #print(df.describe)
+    print(df['Act_class'].unique())
+    print(df.head())
+    df.to_csv(os.path.join(absolute_path, path, prefix + model + 'randomized_training_input.csv'), index = False)
 
     # PHNS: remove nans
     df=df.dropna()  # remove compounds without RDkit descriptors
@@ -53,14 +67,14 @@ def main(path, infile, model, cluster,tc):
     # e.g. Support Vector Machine algorithms are not scale invariant, so it is highly recommended to scale your data
     # PHNS
 
-    X_id.to_csv(os.path.join(absolute_path, path, prefix+model+'_03_X_id.csv'))
+    X_id.to_csv(os.path.join(absolute_path, path, prefix+model+'_random_03_X_id.csv'))
     print('X_id.shape', X_id.shape)
     # save features expected by model:
-    df_feat.head().to_csv(os.path.join(absolute_path, path, prefix+model+'_03_required_features.csv'), sep = ';', index = False)
+    df_feat.head().to_csv(os.path.join(absolute_path, path, prefix+model+'_random_03_required_features.csv'), sep = ';', index = False)
     # Save Testset only for use in predict.py
     df_test = X_id[X_id['Train']==0]
     df_test = df_test.drop(columns=['Train'])
-    df_test.to_csv(os.path.join(absolute_path, path, prefix + '_03_pure_test.csv'), sep = ';', index = False)
+    df_test.to_csv(os.path.join(absolute_path, path, prefix + '_random_03_pure_test.csv'), sep = ';', index = False)
 
     if cv:
         if cluster:
@@ -71,7 +85,7 @@ def main(path, infile, model, cluster,tc):
             df_train_for_cluster = pd.merge(X_train_all, df_with_assigned_clusters, on='SMILES')
             df_train_for_cluster_print = df_train_for_cluster[['ID', 'SMILES', 'Cluster', 'Act_class']]
 
-            df_train_for_cluster_print.to_csv(os.path.join(absolute_path, path, prefix + '_03_train_clustered_TC_'+str(tc)+'.csv'), sep = ';', index = False)
+            df_train_for_cluster_print.to_csv(os.path.join(absolute_path, path, prefix + '_random_03_train_clustered_TC_'+str(tc)+'.csv'), sep = ';', index = False)
 
             groups_train_cluster = df_train_for_cluster['Cluster']
             y_train_cluster = df_train_for_cluster['Act_class']

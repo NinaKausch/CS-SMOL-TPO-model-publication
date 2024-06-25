@@ -75,8 +75,8 @@ def main(path, infile, trained_model, features, test_set):
         y_hat = pd.DataFrame(y_hat)
         y_proba = pd.DataFrame(y_proba)
         df['y_hat'] = y_hat
-        df['proba'] = y_proba[:, 1]
-        df['proba_inactive'] = y_proba[:, 0]
+        df['proba'] = y_proba[1]
+        #df['proba_inactive'] = y_proba[:, 0]
 
         utils.test_vs_train_scores(absolute_path, path, prefix1, model, df, y_hat, y_test=y, X_test=X)
 

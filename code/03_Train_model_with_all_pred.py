@@ -68,13 +68,13 @@ def main(path, infile, model, cluster,tc):
             print('Sphere exclusion clustering started')
             df_with_assigned_clusters = utils.make_cluster_assignment(X_train_all, 'SMILES', tc)
             df_train_for_cluster = pd.merge(X_train_all, df_with_assigned_clusters, on='SMILES')
-            df_train_for_cluster_print = df_train_for_cluster[['ID', 'SMILES', 'Activity_percent', 'Cluster', 'Act_class']]
+            df_train_for_cluster_print = df_train_for_cluster[['ID', 'SMILES','Cluster', 'Act_class']]
 
             df_train_for_cluster_print.to_csv(os.path.join(absolute_path, path, prefix + '_03_train_clustered_TC_'+str(tc)+'.csv'), sep = ';', index = False)
 
             groups_train_cluster = df_train_for_cluster['Cluster']
             y_train_cluster = df_train_for_cluster['Act_class']
-            X_train_cluster = df_train_for_cluster.drop(columns=['ID', 'SMILES', 'Activity_percent', 'Act_class', 'Cluster'])
+            X_train_cluster = df_train_for_cluster.drop(columns=['ID', 'SMILES', 'Act_class', 'Cluster'])
 
             utils.tanimoto_cv(absolute_path, path, prefix, X_train_cluster, y_train_cluster, groups_train_cluster,tc )
 

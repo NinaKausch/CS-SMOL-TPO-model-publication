@@ -66,8 +66,9 @@ def main(path, infile, sep, enrich, Train, bits_required_by_model, TPO_act_tresh
     print('shape of original dataset', data.shape)
 
     print(data.head())
+    data['ID'] = data['ID'].astype(str)
 
-    data_ind = data.set_index("ID")
+    data_ind = data.set_index('ID')
     cmpd_list = list(data_ind.index)
     smiles = dict(zip(data_ind.index.values, data_ind.SMILES))
     (molecules, BitInfo, BitCount, BitCmpd)  = utils.molSupptoFpBits(suppl, cmpd_list, r = 3)
@@ -75,10 +76,11 @@ def main(path, infile, sep, enrich, Train, bits_required_by_model, TPO_act_tresh
 
     # Calculate RDKIT-Properties for SMILES
     data = utils.getRDKitDescriptors(data, smiles_col='SMILES')
-
-    data = data.dropna(subset=['ID', 'SMILES', 'mol'], axis=0)
+    print('shape of df:', data.shape)
+    print(data.head())
+    data = data.dropna(subset=['SMILES', 'mol'], axis=0)
     data = data.mask(data.eq('None')).dropna()
-    print('shape of df: na SMILES, mol & IDs removed', data.shape)
+    print('shape of df: na SMILES, mol (& IDs) removed', data.shape)
 
     data.to_csv(os.path.join(absolute_path, path, output_bits), index=False, sep=';')
 
