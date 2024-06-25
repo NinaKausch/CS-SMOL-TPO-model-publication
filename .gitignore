@@ -139,3 +139,6 @@ dmypy.json
 *.txt
 *.png
 *.xlsx
+
+#folders
+data/
