@@ -38,17 +38,20 @@ import shap
 # run on command line like this: python CS-SMOL-TECHFU-TPO_model/code/04_Predict.py --path data --input .csv
 
 
-def main(path, infile, trained_model, features, test_set):
+def main(path, input, trained_model, features, test_set):
     absolute_path = os.path.dirname(__file__)
-    prefix1 = infile.split('.csv')[0]
+    prefix1 = input.split('.csv')[0]
     prefix2 = trained_model.split('.cbm')[0]
 
-    df = pd.read_table(os.path.join(absolute_path, path, infile), sep = ';', decimal = '.')
-    print(list(df['Act_class']))
+    df = pd.read_table(os.path.join(absolute_path, path, input), sep = ';', decimal = '.')
+    #print(list(df['Act_class']))
 
     print(df.shape)
     print(df.describe)
     print(list(df.columns))
+
+    df = df.dropna()
+    print(df.shape)
 
     # Load trained model from in-memory file object
     from_file = CatBoostClassifier()
@@ -77,6 +80,8 @@ def main(path, infile, trained_model, features, test_set):
         df['y_hat'] = y_hat
         df['proba'] = y_proba[1]
         #df['proba_inactive'] = y_proba[:, 0]
+
+        print(df.shape)
 
         utils.test_vs_train_scores(absolute_path, path, prefix1, model, df, y_hat, y_test=y, X_test=X)
 
@@ -109,4 +114,4 @@ if __name__ == '__main__':
     parser.add_argument('--test_set', action='store_true', default=False,
                         help='does your file contain an Act_class-column? If yes, testset is true')
     args = parser.parse_args()
-    main(infile=args.input, path=args.path, trained_model = args.trained_model, features = args.features, test_set = args.test_set)
+    main(input=args.input, path=args.path, trained_model = args.trained_model, features = args.features, test_set = args.test_set)

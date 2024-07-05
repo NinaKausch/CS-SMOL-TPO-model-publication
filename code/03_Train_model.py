@@ -35,11 +35,11 @@ import shap
 
 # Example for running this script:
 
-def main(path, infile, model, cluster,tc):
+def main(path, input, model, cluster,tc):
     absolute_path = os.path.dirname(__file__)
-    prefix = infile.split('.csv')[0]
+    prefix = input.split('.csv')[0]
 
-    df = pd.read_table(os.path.join(absolute_path, path, infile), sep = ';', decimal = '.')
+    df = pd.read_table(os.path.join(absolute_path, path, input), sep = ';', decimal = '.')
 
     print(df.shape)
     print(df.describe)
@@ -102,5 +102,5 @@ if __name__ == '__main__':
     parser.add_argument('--TC', action='store', default=0.6, help='Tanimoto cut-off for clustering', type=float)
 
     args = parser.parse_args()
-    main(infile=args.input, path=args.path, model = args.model, cluster = args.cluster, tc=args.TC)
+    main(input=args.input, path=args.path, model = args.model, cluster = args.cluster, tc=args.TC)
 

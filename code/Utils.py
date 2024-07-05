@@ -64,7 +64,7 @@ def calculate_chargestate(physchem_df, input_chargestate, output_chargestate):
 
 from chembl_structure_pipeline import standardizer
 
-def chembl_standardize(smiles):
+def standardize_chembl(smiles):
     '''Function for default standardization as employed in ChEMBl. Copyright (c) 2019 Greg Landrum;
     see: https://github.com/chembl/ChEMBL_Structure_Pipeline/blob/master/chembl_structure_pipeline/standardizer.py
          https://jcheminf.biomedcentral.com/articles/10.1186/s13321-020-00456-1'''
@@ -82,6 +82,27 @@ def chembl_standardize(smiles):
     else:
         return None
 
+
+def get_parent_chembl(smiles):
+    '''Applies default tranformation to a SMILES string and returns the parent molecule SMILES string. neutralize=True, check_exclusion=True'''
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is not None:
+        result = standardizer.get_parent_mol(mol)
+
+        # If a tuple is returned, extract the ROMol object; adjust this based on the actual structure of the return value
+        if isinstance(result, tuple):
+            parent_mol = result[0]  # Assuming the ROMol object is the first element of the tuple
+        else:
+            parent_mol = result
+
+        # Ensure parent_mol is an RDKit ROMol object before converting to SMILES
+        if isinstance(parent_mol, Chem.rdchem.Mol):
+            return Chem.MolToSmiles(parent_mol)
+        else:
+            raise TypeError("Expected RDKit ROMol object, got something else.")
+    else:
+        return None
 #################################################### BASIC SMILES CLEANING #################################################################
 
 def standardized_mol(smiles):
@@ -286,6 +307,23 @@ def to_fp(s: str, fingerprint_radius: int, fingerprint_bits: int):
     finally:
         return fp
 
+###################### Calculate ECFP4 Version 2 #######################################################################
+# See:
+# https://practicalcheminformatics.blogspot.com/2020/03/benchmarking-one-molecular-fingerprint.html
+# https://github.com/PatWalters/benchmark_map4/blob/master/benchmark_map4.ipynb
+
+def fp_as_array(mol, fingerprint_radius, fingerprint_bits):
+    fp = AllChem.GetMorganFingerprintAsBitVect(mol, fingerprint_radius, nBits=fingerprint_bits)
+    arr = np.zeros((1,), int)
+    DataStructs.ConvertToNumpyArray(fp, arr)
+    return arr
+
+def build_dataframe(df):
+    df = df[['SMILES']]
+    df['mol'] = [Chem.MolFromSmiles(x) for x in df.SMILES]
+    df['morgan'] = [fp_as_array(x, fingerprint_radius=3, fingerprint_bits=1024) for x in df.mol]
+    return df
+
 ########################## Build Model #################################################################################
 
 import sklearn
@@ -332,7 +370,7 @@ def split_train_test (df):
     # PHNS
     X_train_all = X_train_id
     X_train = X_train_id.drop(columns=id_list, errors='ignore')
-    print('X_train.columns', X_train.columns)
+    print('X_train.columns', list(X_train.columns))
     X_test = X_test_id.drop(columns=id_list, errors='ignore')
 
     return X_train, X_test, y_train, y_test, X_id, df_feat, X_train_all
@@ -490,6 +528,11 @@ def model_cv(absolute_path, path, prefix, X_train, y_train):
 
 
 def train_final_model(absolute_path, path, prefix, model, X_train, X_test, y_train, y_test, X_id):
+    print('X_id.head()', X_id.head())
+    print('X_train.head()', X_train.head())
+    print('X_train.shape', X_train.shape)
+    print('len y_train', len(y_train))
+
     if model == 'catboost':
         classes = np.unique(y_train)
         weights = compute_class_weight(class_weight='balanced', classes=classes, y=y_train)
@@ -575,21 +618,71 @@ def train_final_model(absolute_path, path, prefix, model, X_train, X_test, y_tra
     recall = recall_score(y_test, y_hat_test)
     print('recall =' + str(recall))
 
+def train_final_model_no_split(absolute_path, path, prefix, model, X_id):
+    print('X_id.head()', X_id.head())
+    print(list(X_id.columns))
+    X_train_no_split = X_id.drop(columns = ['Act_class', 'ID', 'SMILES', 'Activity_percent'], errors='ignore')
+    y_train_no_split = X_id['Act_class']
+
+    if model == 'catboost':
+        classes = np.unique(y_train_no_split)
+        weights = compute_class_weight(class_weight='balanced', classes=classes, y=y_train_no_split)
+        class_weights = dict(zip(classes, weights))
+        model = CatBoostClassifier(random_seed=42, logging_level="Silent", iterations=150,
+                                       class_weights=class_weights)
+
+        model.fit(X_train_no_split, y_train_no_split)
+
+        id_list = ['ID', 'SMILES', 'Act_class', 'Train']
+        X = X_id.drop(columns=id_list)
+        print('X_id.shape:', X_id.shape)
+        print('X.shape:', X.shape)
+
+        y_hat = model.predict(X)
+        #y_hat_test = model.predict(X_train_no_split)
+        y_proba = model.predict_proba(X)
+
+        X_id['y_hat'] = y_hat
+        X_id['proba'] = y_proba[:, 1]
+        X_id['proba_inactive'] = y_proba[:, 0]
+
+        print('Shape of y_hat:', y_hat.shape)
+        print('Shape of y_proba:', y_proba.shape)
+
+        model.save_model(os.path.join(absolute_path, path, prefix + 'catboost_no_split.cbm'), format="cbm", export_parameters=None, pool=None)
+        X_id.to_csv(os.path.join(absolute_path, path, prefix + '_03_catboost_predict_no_split.csv'), index=False, sep=';')
+
+        # Metrics
+        balanced_accuracy = balanced_accuracy_score(y_train_no_split, y_hat)
+        print('balanced_accuracy =' + str(balanced_accuracy))
+        f1 = f1_score(y_train_no_split, y_hat)
+        print('f1 =' + str(f1))
+        Matthews_scorer = matthews_corrcoef(y_train_no_split, y_hat)
+        print('Matthewes_scorer = ' + str(Matthews_scorer))
+        precision = precision_score(y_train_no_split, y_hat)
+        print('precision =' + str(precision))
+        recall = recall_score(y_train_no_split, y_hat)
+        print('recall =' + str(recall))
+
+
+
 def test_vs_train_scores(absolute_path, path, prefix, model, df, y_hat, y_test, X_test):
-    plt.rcParams["figure.figsize"] = (3, 3)
-    ax = sns.boxplot(x="y_hat", y="proba", data=df)
-    plt.savefig(os.path.join(absolute_path, path, prefix + '_04_box_y_hat_vs_proba.png'))
+    df = df.dropna()
+    print(df.shape)
+    #plt.rcParams["figure.figsize"] = (3, 3)
+    #ax = sns.boxplot(x="y_hat", y="proba", data=df)
+    #plt.savefig(os.path.join(absolute_path, path, prefix + '_04_box_y_hat_vs_proba.png'))
 
-    plt.rcParams["figure.figsize"] = (3, 3)
-    ax = sns.boxplot(x="Act_class", y="proba", data=df)
-    plt.savefig(os.path.join(absolute_path, path, prefix + '_04_box_Act_class_vs_proba.png'))
+    ##plt.rcParams["figure.figsize"] = (3, 3)
+    #ax = sns.boxplot(x="Act_class", y="proba", data=df)
+    #plt.savefig(os.path.join(absolute_path, path, prefix + '_04_box_Act_class_vs_proba.png'))
 
-    plt.rcParams["figure.figsize"] = (3, 3)
+    #plt.rcParams["figure.figsize"] = (3, 3)
     #cm = plot_confusion_matrix(model, X_test, y_test, values_format='d')
-    cm = confusion_matrix(y_test, y_hat, labels=model.classes_)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
+   # cm = confusion_matrix(y_test, y_hat, labels=model.classes_)
+    #disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
 
-    plt.savefig(os.path.join(absolute_path, path, prefix + '_04_confusion_matrix.png'))
+    #plt.savefig(os.path.join(absolute_path, path, prefix + '_04_confusion_matrix.png'))
 
     # Metrics
     balanced_accuracy = balanced_accuracy_score(y_test, y_hat)
