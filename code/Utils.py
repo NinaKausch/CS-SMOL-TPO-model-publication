@@ -375,6 +375,7 @@ def split_train_test (df):
 
     return X_train, X_test, y_train, y_test, X_id, df_feat, X_train_all
 
+
 def tanimoto_cv(absolute_path, path, prefix, X_train, y_train, groups_train,tc):
     # '''stratified k-fold on X_train with chemical cluster always assigned to one fold, cv with lr, rf, gbt, catboost, make cv plots'''
     # return
@@ -422,7 +423,7 @@ def tanimoto_cv(absolute_path, path, prefix, X_train, y_train, groups_train,tc):
         result_df['model'] = key
         results_all = results_all.append(result_df, ignore_index=True)
 
-    # PHNS: adjust tab to make sure that creation of plots is only done once all cross-validation runs are finished
+
     results_all.to_csv(os.path.join(absolute_path, path, prefix + '_03_model_cv_cluster_TC_'+str(tc)+'.csv'), index=False, sep=';')
 
     results_all_group = results_all.groupby('model').agg(
@@ -444,12 +445,7 @@ def tanimoto_cv(absolute_path, path, prefix, X_train, y_train, groups_train,tc):
 
     y_list = ['test_accuracy', 'test_balanced_accuracy', 'test_MCC', 'test_f1_score', 'test_precision', 'test_recall']
 
-    for i in y_list:
-        sns.set_style("whitegrid")
-        sns.boxplot(x="model", y=i, data=results_all)
-        plt.savefig(os.path.join(absolute_path, path, prefix + '_' + i + '_03_model_cv_cluster_box_TC_'+str(tc)+'.png'))
-        # PHNS: avoid overlaying images
-        plt.clf()
+
 
 def model_cv(absolute_path, path, prefix, X_train, y_train):
 
@@ -518,14 +514,201 @@ def model_cv(absolute_path, path, prefix, X_train, y_train):
 
     y_list = ['test_accuracy', 'test_balanced_accuracy', 'test_MCC', 'test_f1_score', 'test_precision','test_recall']
 
-    for i in y_list:
-        sns.set_style("whitegrid")
-        sns.boxplot(x="model", y=i,data=results_all)
-        plt.savefig(os.path.join(absolute_path, path, prefix + '_' + i +'_03_model_cv_box.png'))
-        # PHNS: avoid overlaying images
-        plt.clf()
 
 
+####################################CORRECTION: MODEL TRAINING WITH CLASS WEIGHTS FOR ALL MODELS######################################
+
+def model_cv_with_weights(absolute_path, path, prefix, X_train, y_train):
+    '''stratified k-fold on X_train, cv with lr, rf, gbt, catboost, make cv plots
+    In this version balanced weights for *all* models are used'''
+
+    classes = np.unique(y_train)
+    weights = compute_class_weight(class_weight='balanced', classes=classes, y=y_train)
+    class_weights = dict(zip(classes, weights))
+    
+    # Use class_weight='balanced' for LogisticRegression
+    lr = LogisticRegression(class_weight='balanced')
+    
+    # Use class_weight='balanced' for RandomForestClassifier
+    rf = RandomForestClassifier(n_estimators=50, class_weight='balanced')
+    
+    # GradientBoostingClassifier doesn't have class_weight parameter
+    # use sample_weight during fitting for this model
+    gbt = GradientBoostingClassifier()
+    
+    # XGBClassifier uses scale_pos_weight for binary classification 
+    xgb = XGBClassifier(objective='binary:logistic', missing=None, seed=42, max_depth=3, colsample_bytree=0.76,
+                        gamma=0.03, n_estimators=125, subsample=0.71, learning_rate=0.33,
+                        scale_pos_weight=y_train.sum() / y_train.shape[0])
+    
+    # CatBoostClassifier uses class_weights 
+    catboost = CatBoostClassifier(random_seed=42, logging_level="Silent", iterations=150, class_weights=class_weights)
+
+    models = {'lr': lr, 'rf': rf, 'gbt': gbt, 'xgb': xgb, 'catboost': catboost}
+
+    # run cv loop
+    results_all = pd.DataFrame()
+
+    for key, value in models.items():
+        scoring = {'accuracy': make_scorer(accuracy_score),
+                   'balanced_accuracy': make_scorer(balanced_accuracy_score),
+                   'MCC': make_scorer(matthews_corrcoef),
+                   'f1_score': make_scorer(f1_score),
+                   'precision': make_scorer(precision_score),
+                   'recall': make_scorer(recall_score)
+                   }
+
+        cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=5, random_state=42)
+        
+        # For GradientBoostingClassifier, need to handle class weights differently
+        if key == 'gbt':
+            # Create sample weights based on class distribution
+            sample_weights = np.ones_like(y_train, dtype=float)
+            for idx, cls in enumerate(classes):
+                sample_weights[y_train == cls] = weights[idx]
+                
+            # Use fit_params to pass sample_weights to cross_validate
+            results = cross_validate(estimator=value,
+                                    X=X_train,
+                                    y=y_train,
+                                    cv=cv,
+                                    scoring=scoring,
+                                    fit_params={'sample_weight': sample_weights})
+        else:
+            results = cross_validate(estimator=value,
+                                    X=X_train,
+                                    y=y_train,
+                                    cv=cv,
+                                    scoring=scoring)
+
+        result_df = pd.DataFrame.from_dict(results)
+        result_df['model'] = key
+        # Use concat instead of append which is deprecated
+        results_all = pd.concat([results_all, result_df], ignore_index=True)
+        #results_all = results_all.append(result_df, ignore_index=True)
+
+   
+    results_all.to_csv(os.path.join(absolute_path, path, prefix + '_03_model_cv_weight_corrected.csv'), index=False, sep=';')
+    
+    results_all_group = results_all.groupby('model').agg(
+        accuracy_mean = pd.NamedAgg(column = 'test_accuracy', aggfunc = np.mean),
+        balanced_accuracy_mean= pd.NamedAgg(column = 'test_balanced_accuracy', aggfunc = np.mean),
+        MCC_mean= pd.NamedAgg(column = 'test_MCC', aggfunc = np.mean),
+        f1_score_mean= pd.NamedAgg(column = 'test_f1_score', aggfunc = np.mean),
+        precision_mean= pd.NamedAgg(column = 'test_precision', aggfunc = np.mean),
+        recall_mean= pd.NamedAgg(column = 'test_recall', aggfunc = np.mean),
+        accuracy_std=pd.NamedAgg(column='test_accuracy', aggfunc=np.std),
+        balanced_accuracy_std=pd.NamedAgg(column='test_balanced_accuracy', aggfunc=np.std),
+        MCC_std=pd.NamedAgg(column='test_MCC', aggfunc=np.std),
+        f1_score_std=pd.NamedAgg(column='test_f1_score', aggfunc=np.std),
+        precision_std=pd.NamedAgg(column='test_precision', aggfunc=np.std),
+        recall_std=pd.NamedAgg(column='test_recall', aggfunc=np.std),
+    ).reset_index()
+
+    results_all_group.to_csv(os.path.join(absolute_path, path, prefix + '_03_model_cv_group_weight_corrected.csv'), index=False, sep=';')
+
+    y_list = ['test_accuracy', 'test_balanced_accuracy', 'test_MCC', 'test_f1_score', 'test_precision','test_recall']
+
+
+def tanimoto_cv_with_class_weights(absolute_path, path, prefix, X_train, y_train, groups_train, tc):
+    '''stratified k-fold on X_train with chemical cluster always assigned to one fold, cv with lr, rf, gbt, catboost, make cv plots
+    In this version balanced weights for *all* models are used'''
+    
+    classes = np.unique(y_train)
+    weights = compute_class_weight(class_weight='balanced', classes=classes, y=y_train)
+    class_weights = dict(zip(classes, weights))
+    
+    # Add class_weight='balanced' to LogisticRegression
+    lr = LogisticRegression(class_weight='balanced')
+    
+    # Add class_weight='balanced' to RandomForestClassifier
+    rf = RandomForestClassifier(n_estimators=50, class_weight='balanced')
+    
+    # GradientBoostingClassifier doesn't have class_weight parameter
+    # Handled it separately during cross-validation
+    gbt = GradientBoostingClassifier()
+    
+    # SVM already has class_weights parameter (no change needed)
+    svm_classifier = SVC(kernel='rbf', class_weight=class_weights)
+
+    # XGBClassifier uses scale_pos_weight for binary classification (already set)
+    xgb = XGBClassifier(objective='binary:logistic', missing=None, seed=42, max_depth=3, colsample_bytree=0.76,
+                        gamma=0.03, n_estimators=125, subsample=0.71, learning_rate=0.33,
+                        scale_pos_weight=y_train.sum() / y_train.shape[0])
+    
+    # CatBoostClassifier uses class_weights (already set)
+    catboost = CatBoostClassifier(random_seed=42, logging_level="Silent", iterations=150, class_weights=class_weights)
+
+    models = {'lr': lr, 'rf': rf, 'gbt': gbt, 'xgb': xgb, 'catboost': catboost, 'svm': svm_classifier}
+
+    # run cv loop
+    results_all = pd.DataFrame()
+
+    for key, value in models.items():
+        scoring = {'accuracy': make_scorer(accuracy_score),
+                   'balanced_accuracy': make_scorer(balanced_accuracy_score),
+                   'MCC': make_scorer(matthews_corrcoef),
+                   'f1_score': make_scorer(f1_score),
+                   'precision': make_scorer(precision_score),
+                   'recall': make_scorer(recall_score)
+                   }
+
+        # only 5-fold grouped cross-validation, not 5x5
+        cv_fp = StratifiedGroupKFold(n_splits=5, random_state=42, shuffle=True)
+        
+        # For GradientBoostingClassifier, need to handle class weights differently
+        if key == 'gbt':
+            # Create sample weights based on class distribution
+            sample_weights = np.ones_like(y_train, dtype=float)
+            for idx, cls in enumerate(classes):
+                sample_weights[y_train == cls] = weights[idx]
+                
+            # Use fit_params to pass sample_weights to cross_validate
+            results = cross_validate(estimator=value,
+                                    X=X_train,
+                                    y=y_train,
+                                    cv=cv_fp,
+                                    scoring=scoring, 
+                                    groups=groups_train,
+                                    fit_params={'sample_weight': sample_weights})
+        else:
+            results = cross_validate(estimator=value,
+                                    X=X_train,
+                                    y=y_train,
+                                    cv=cv_fp,
+                                    scoring=scoring, 
+                                    groups=groups_train)
+
+        result_df = pd.DataFrame.from_dict(results)
+        result_df['model'] = key
+        # Use concat instead of append which is deprecated in newer pandas versions
+        results_all = pd.concat([results_all, result_df], ignore_index=True)
+        #results_all = results_all.append(result_df, ignore_index=True)
+
+    # Save results to CSV
+    results_all.to_csv(os.path.join(absolute_path, path, prefix + '_03_model_cv_cluster_TC_weight_corrected_'+str(tc)+'.csv'), index=False, sep=';')
+
+    results_all_group = results_all.groupby('model').agg(
+        accuracy_mean=pd.NamedAgg(column='test_accuracy', aggfunc=np.mean),
+        balanced_accuracy_mean=pd.NamedAgg(column='test_balanced_accuracy', aggfunc=np.mean),
+        MCC_mean=pd.NamedAgg(column='test_MCC', aggfunc=np.mean),
+        f1_score_mean=pd.NamedAgg(column='test_f1_score', aggfunc=np.mean),
+        precision_mean=pd.NamedAgg(column='test_precision', aggfunc=np.mean),
+        recall_mean=pd.NamedAgg(column='test_recall', aggfunc=np.mean),
+        accuracy_std=pd.NamedAgg(column='test_accuracy', aggfunc=np.std),
+        balanced_accuracy_std=pd.NamedAgg(column='test_balanced_accuracy', aggfunc=np.std),
+        MCC_std=pd.NamedAgg(column='test_MCC', aggfunc=np.std),
+        f1_score_std=pd.NamedAgg(column='test_f1_score', aggfunc=np.std),
+        precision_std=pd.NamedAgg(column='test_precision', aggfunc=np.std),
+        recall_std=pd.NamedAgg(column='test_recall', aggfunc=np.std),
+    ).reset_index()
+
+    results_all_group.to_csv(os.path.join(absolute_path, path, prefix + '_03_model_cv_cluster_group_TC_weight_corrected'+str(tc)+'.csv'), index=False, sep=';')
+
+    y_list = ['test_accuracy', 'test_balanced_accuracy', 'test_MCC', 'test_f1_score', 'test_precision', 'test_recall']
+
+
+###################################CORRECTION ENDS HERE##########################################################
 
 def train_final_model(absolute_path, path, prefix, model, X_train, X_test, y_train, y_test, X_id):
     print('X_id.head()', X_id.head())
